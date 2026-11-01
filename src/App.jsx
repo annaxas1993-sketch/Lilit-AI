@@ -46,7 +46,7 @@ export default function App() {
           width: 512,
           height: 512,
           steps: 12,
-          seed: Math.floor(Math.random() * 2147483647),
+          seed: String(Math.floor(Math.random() * 2147483647)),
           n: 1,
           sampler_name: 'k_euler',
           cfg_scale: 7,
