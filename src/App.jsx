@@ -3,17 +3,32 @@ import { Sparkles, ImagePlus, WandSparkles, Download, Upload, Heart, Image, Load
 import './App.css'
 
 const API = 'https://aihorde.net/api/v2'
+const headers = {
+  'Content-Type': 'application/json',
+  apikey: '0000000000',
+  'Client-Agent': 'Lilit-AI:1.0:anonymous'
+}
 
 export default function App() {
   const [tab, setTab] = useState('create')
   const [prompt, setPrompt] = useState('')
+  const [editPrompt, setEditPrompt] = useState('')
   const [photo, setPhoto] = useState(null)
   const [result, setResult] = useState('')
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
 
-  async function createImage() {
-    if (!prompt.trim()) {
+  function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result)
+      reader.onerror = reject
+      reader.readAsDataURL(file)
+    })
+  }
+
+  async function generateImage(description, sourceImage = null) {
+    if (!description.trim()) {
       setMessage('Նախ գրիր նկարի նկարագրությունը։')
       return
     }
@@ -22,33 +37,36 @@ export default function App() {
     setResult('')
     setMessage('Ուղարկում ենք հարցումը AI-ին...')
 
-    const headers = {
-      'Content-Type': 'application/json',
-      apikey: '0000000000',
-      'Client-Agent': 'Lilit-AI:1.0:anonymous'
-    }
-
     try {
+      const body = {
+        prompt: description.trim(),
+        params: {
+          width: 512,
+          height: 512,
+          steps: 20,
+          n: 1,
+          sampler_name: 'k_euler',
+          cfg_scale: 7,
+          denoising_strength: sourceImage ? 0.55 : 1
+        },
+        nsfw: false,
+        censor_nsfw: true,
+        r2: true
+      }
+
+      if (sourceImage) {
+        body.source_image = sourceImage
+        body.source_processing = 'img2img'
+      }
+
       const response = await fetch(`${API}/generate/async`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-          prompt: prompt.trim(),
-          params: {
-            width: 512,
-            height: 512,
-            steps: 20,
-            n: 1,
-            sampler_name: 'k_euler',
-            cfg_scale: 7
-          },
-          nsfw: false,
-          censor_nsfw: true,
-          r2: true
-        })
+        body: JSON.stringify(body)
       })
 
       const data = await response.json()
+
       if (!response.ok || !data.id) {
         throw new Error(data.message || 'AI հարցումը չընդունվեց։')
       }
@@ -58,28 +76,40 @@ export default function App() {
       for (let i = 0; i < 100; i++) {
         await new Promise(resolve => setTimeout(resolve, 5000))
 
-        const checkResponse = await fetch(`${API}/generate/check/${data.id}`, { headers })
+        const checkResponse = await fetch(
+          `${API}/generate/check/${data.id}`,
+          { headers }
+        )
         const check = await checkResponse.json()
 
-        if (check.faulted) throw new Error('AI սերվերի սխալ։ Փորձիր կրկին։')
+        if (check.faulted) {
+          throw new Error('AI սերվերի սխալ։ Փորձիր կրկին։')
+        }
 
         if (check.done) {
           finished = true
           break
         }
 
-        setMessage(`Նկարը պատրաստվում է... ${Math.min(i + 1, 100)}%`)
+        setMessage(`Նկարը պատրաստվում է... ${i + 1}%`)
       }
 
-      if (!finished) throw new Error('Ստեղծումը երկար տևեց։ Փորձիր կրկին։')
+      if (!finished) {
+        throw new Error('Ստեղծումը երկար տևեց։ Փորձիր կրկին։')
+      }
 
       setMessage('Բեռնում ենք պատրաստ նկարը...')
 
-      const statusResponse = await fetch(`${API}/generate/status/${data.id}`, { headers })
+      const statusResponse = await fetch(
+        `${API}/generate/status/${data.id}`,
+        { headers }
+      )
       const status = await statusResponse.json()
       const imageUrl = status.generations?.[0]?.img
 
-      if (!imageUrl) throw new Error('Նկարը չստացվեց։ Փորձիր նորից։')
+      if (!imageUrl) {
+        throw new Error('Նկարը չստացվեց։ Փորձիր նորից։')
+      }
 
       setResult(imageUrl)
       setMessage('Նկարը պատրաստ է։')
@@ -90,11 +120,35 @@ export default function App() {
     }
   }
 
+  function createImage() {
+    generateImage(prompt)
+  }
+
+  async function editImage() {
+    if (!photo) {
+      setMessage('Նախ ընտրիր նկար հեռախոսից։')
+      return
+    }
+
+    if (!editPrompt.trim()) {
+      setMessage('Գրիր՝ ինչ փոփոխություն ես ուզում անել։')
+      return
+    }
+
+    try {
+      setMessage('Պատրաստում ենք սկզբնական նկարը...')
+      const base64 = await fileToBase64(photo)
+      await generateImage(editPrompt, base64)
+    } catch {
+      setMessage('Չհաջողվեց կարդալ ընտրված նկարը։')
+    }
+  }
+
   function downloadImage() {
     if (!result) return
     const link = document.createElement('a')
     link.href = result
-    link.download = 'Lilit-AI-image.png'
+    link.download = 'Lilit-AI-image.webp'
     link.target = '_blank'
     link.click()
   }
@@ -113,10 +167,10 @@ export default function App() {
       </section>
 
       <nav>
-        <button className={tab === 'create' ? 'active' : ''} onClick={() => setTab('create')}>
+        <button className={tab === 'create' ? 'active' : ''} onClick={() => { setTab('create'); setMessage(''); setResult('') }}>
           <Sparkles size={18}/> Ստեղծել նկար
         </button>
-        <button className={tab === 'edit' ? 'active' : ''} onClick={() => setTab('edit')}>
+        <button className={tab === 'edit' ? 'active' : ''} onClick={() => { setTab('edit'); setMessage(''); setResult('') }}>
           <WandSparkles size={18}/> Խմբագրել
         </button>
       </nav>
@@ -135,9 +189,7 @@ export default function App() {
             {loading ? <LoaderCircle size={19}/> : <Sparkles size={19}/>}
             {loading ? 'Սպասիր...' : 'Ստեղծել AI նկար'}
           </button>
-
           {message && <p className="selected">{message}</p>}
-
           {result && (
             <div style={{ marginTop: 20 }}>
               <img src={result} alt="Lilit AI ստեղծած նկար" style={{ width: '100%', borderRadius: 16 }} />
@@ -150,18 +202,58 @@ export default function App() {
       ) : (
         <section className="panel">
           <h2><ImagePlus/> Նկար խմբագրել</h2>
-          <p>Ընտրիր նկար հեռախոսից։</p>
+          <p>Ընտրիր նկար հեռախոսից և գրիր՝ ինչ փոխել։</p>
+
           <label className="upload">
             <Upload size={32}/>
             <strong>Ընտրել նկար</strong>
             <small>JPG, PNG կամ WEBP</small>
-            <input type="file" accept="image/*" onChange={e => setPhoto(e.target.files[0])}/>
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              onChange={e => {
+                setPhoto(e.target.files?.[0] || null)
+                setResult('')
+                setMessage('')
+              }}
+              disabled={loading}
+            />
           </label>
-          {photo && <p className="selected">Ընտրված է՝ {photo.name}</p>}
-          {photo && <img src={URL.createObjectURL(photo)} alt="Ընտրված նկար" style={{ width: '100%', borderRadius: 16 }} />}
-          <button className="mainButton" onClick={() => setMessage('Խմբագրման գործիքները կավելացնենք հաջորդ քայլով։')}>
-            <WandSparkles size={19}/> Խմբագրել նկարը
+
+          {photo && (
+            <>
+              <p className="selected">Ընտրված է՝ {photo.name}</p>
+              <img
+                src={URL.createObjectURL(photo)}
+                alt="Ընտրված նկար"
+                style={{ width: '100%', borderRadius: 16 }}
+              />
+            </>
+          )}
+
+          <textarea
+            value={editPrompt}
+            onChange={e => setEditPrompt(e.target.value)}
+            placeholder="Օրինակ՝ փոխիր ֆոնը լեռնային բնապատկերի, դարձրու նկարը ավելի լուսավոր..."
+            disabled={loading}
+          />
+
+          <button className="mainButton" onClick={editImage} disabled={loading}>
+            {loading ? <LoaderCircle size={19}/> : <WandSparkles size={19}/>}
+            {loading ? 'Խմբագրում ենք...' : 'Խմբագրել նկարը AI-ով'}
           </button>
+
+          {message && <p className="selected">{message}</p>}
+
+          {result && (
+            <div style={{ marginTop: 20 }}>
+              <h3>Խմբագրված նկարը</h3>
+              <img src={result} alt="AI խմբագրված նկար" style={{ width: '100%', borderRadius: 16 }} />
+              <button className="mainButton" onClick={downloadImage}>
+                <Download size={19}/> Ներբեռնել նկարը
+              </button>
+            </div>
+          )}
         </section>
       )}
 
